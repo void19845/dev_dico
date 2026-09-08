@@ -98,6 +98,47 @@
         .node-glow {
             filter: url(#glow);
         }
+
+        /* Pannable/zoomable canvas cursor */
+        #viz svg {
+            cursor: grab;
+        }
+
+        #viz svg:active {
+            cursor: grabbing;
+        }
+
+        /* Scrollable sidebar (detail panel) */
+        #info-panel {
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
+        }
+
+        /* Scrollable tooltip (guards against overly long content) */
+        #tooltip {
+            max-width: 260px;
+            max-height: 220px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
+        }
+
+        #info-panel::-webkit-scrollbar,
+        #tooltip::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #info-panel::-webkit-scrollbar-track,
+        #tooltip::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #info-panel::-webkit-scrollbar-thumb,
+        #tooltip::-webkit-scrollbar-thumb {
+            background-color: rgba(148, 163, 184, 0.5);
+            border-radius: 999px;
+        }
     </style>
 </head>
 <body data-theme="dark">
@@ -123,6 +164,9 @@
         </div>
 
         <div class="pointer-events-auto flex gap-3">
+            <button id="recenter-btn" title="Recenter graph" class="p-2 rounded-full bg-slate-200 dark:bg-slate-800 transition-colors hover:scale-110 active:scale-95">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8a4 4 0 100 8 4 4 0 000-8z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v3m0 14v3m10-10h-3M5 12H2"></path></svg>
+            </button>
             <button id="theme-toggle" class="p-2 rounded-full bg-slate-200 dark:bg-slate-800 transition-colors hover:scale-110 active:scale-95">
                 <svg id="sun-icon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M12 5a7 7 0 100 14 7 7 0 000-14z"></path></svg>
                 <svg id="moon-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
@@ -182,11 +226,49 @@
         const linkGroup = g.append('g').attr('class', 'links');
         const nodeGroup = g.append('g').attr('class', 'nodes');
 
+        // Pan (click + drag on empty canvas) and zoom (scroll wheel / pinch)
+        const zoom = d3.zoom()
+            .scaleExtent([0.2, 5])
+            .on('zoom', (event) => {
+                g.attr('transform', event.transform);
+            });
+
+        svg.call(zoom).call(zoom.transform, d3.zoomIdentity);
+
         const simulation = d3.forceSimulation()
             .force('link', d3.forceLink().id(d => d.id).distance(120))
             .force('charge', d3.forceManyBody().strength(-800))
             .force('center', d3.forceCenter(500, 500))
             .force('collision', d3.forceCollide().radius(d => d.size + 20));
+
+        // Drag-to-reposition behavior for individual nodes.
+        // d3-drag suppresses the subsequent click when an actual drag
+        // happened, so the existing click-to-open-details handler keeps
+        // working for plain clicks.
+        function drag(sim) {
+            function dragstarted(event, d) {
+                if (event.sourceEvent) event.sourceEvent.stopPropagation();
+                if (!event.active) sim.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragended(event, d) {
+                if (!event.active) sim.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+
+            return d3.drag()
+                .on('start', dragstarted)
+                .on('drag', dragged)
+                .on('end', dragended);
+        }
 
         function initTabs() {
             const nav = document.getElementById('language-tabs');
@@ -289,10 +371,12 @@
                     link.attr('x1', d => d.source.x)
                         .attr('y1', d => d.source.y)
                         .attr('x2', d => d.target.x)
-                        .attr('y2', d.target.y);
+                        .attr('y2', d => d.target.y);
 
                     node.attr('transform', d => `translate(${d.x},${d.y})`);
                 });
+
+            node.call(drag(simulation));
 
             simulation.alpha(1).restart();
         }
@@ -431,6 +515,10 @@
 
         document.getElementById('close-panel').onclick = () => {
             document.getElementById('info-panel').classList.add('hidden-panel');
+        };
+
+        document.getElementById('recenter-btn').onclick = () => {
+            svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
         };
 
         document.getElementById('theme-toggle').onclick = () => {
